@@ -73,3 +73,121 @@ Edge Database   Synchronization Queue
                      │
                      ▼
               Cloud Database
+
+## Technology Stack
+
+| Layer | Technology |
+|--------|------------|
+| Language | Python |
+| Messaging | MQTT |
+| Broker | Eclipse Mosquitto |
+| API | FastAPI |
+| Database | PostgreSQL |
+| Containers | Docker |
+| Orchestration | Kubernetes |
+| Packaging | Helm |
+| Monitoring | Prometheus |
+| Dashboards | Grafana |
+| Tracing | OpenTelemetry |
+
+---
+
+## Project Structure
+
+```text
+services/
+├── sensor-simulator/
+├── edge-ingestion/
+├── edge-sync/
+└── cloud-api/
+
+infrastructure/
+├── mosquitto/
+├── kubernetes/
+└── monitoring/
+
+docs/
+
+tests/
+```
+
+---
+
+## System Workflow
+
+1. Simulated IoT devices generate telemetry.
+2. Telemetry is published through MQTT.
+3. The Edge platform validates incoming messages.
+4. Valid telemetry is persisted locally.
+5. Abnormal values are detected.
+6. Data is queued for synchronization.
+7. Once connectivity is restored, pending messages are synchronized with the cloud.
+8. The cloud stores long-term telemetry.
+
+---
+
+## Key Engineering Concepts
+
+- Edge Computing
+- Cloud Computing
+- Distributed Systems
+- Event-Driven Architecture
+- Message Brokers
+- Fault Tolerance
+- Idempotency
+- Infrastructure as Code
+- Observability
+- Containerization
+
+---
+
+## Roadmap
+
+- [ ] MQTT Broker
+- [ ] Sensor Simulator
+- [ ] Edge Ingestion Service
+- [ ] PostgreSQL Persistence
+- [ ] Cloud Synchronization
+- [ ] FastAPI
+- [ ] Prometheus
+- [ ] Grafana
+- [ ] OpenTelemetry
+- [ ] Docker Compose
+- [ ] Kubernetes
+- [ ] Helm
+
+---
+
+## Status
+
+> 🚧 Currently under active development.
+
+---
+
+## Architecture Decisions
+
+One of the main goals of this project is not only to build a working platform, but also to justify every architectural decision.
+
+Each major technology will be documented and motivated throughout the project.
+
+### Why MQTT?
+
+The system follows a publish/subscribe architecture where IoT devices are decoupled from processing services.
+
+MQTT was chosen because it provides:
+
+- Lightweight communication
+- Asynchronous messaging
+- Loose coupling between producers and consumers
+- Scalability
+- Resilience during intermittent connectivity
+
+Future architectural decisions will include:
+
+- Why PostgreSQL?
+- Why FastAPI?
+- Why Docker?
+- Why Kubernetes?
+- Why Prometheus?
+- Why OpenTelemetry?
+- Why Edge Computing?
