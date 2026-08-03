@@ -12,6 +12,13 @@ MQTT_TOPIC = "santa-maria/telemetry/#"
 MQTT_QOS = 0
 
 
+REQUIRED_TELEMETRY_FIELDS = {
+    "device_id",
+    "metric",
+    "value",
+    "unit",
+}
+
 def parse_payload(payload: bytes) -> dict | None:
     try:
         payload_text = payload.decode("utf-8")
@@ -26,6 +33,23 @@ def parse_payload(payload: bytes) -> dict | None:
         return None
 
     return telemetry_message
+
+
+def validate_telemetry_message(telemetry_message: dict) -> bool:
+    missing_fields = REQUIRED_TELEMETRY_FIELDS.difference(
+        telemetry_message
+    )
+
+    if missing_fields:
+        formatted_fields = ", ".join(sorted(missing_fields))
+
+        print(
+            f"Rejected telemetry message: "
+            f"missing required fields: {formatted_fields}"
+        )
+        return False
+
+    return True
 
 
 def on_connect(
@@ -63,6 +87,9 @@ def on_message(
     telemetry_message = parse_payload(message.payload)
 
     if telemetry_message is None:
+        return
+
+    if not validate_telemetry_message(telemetry_message):
         return
 
     print(
