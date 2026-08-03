@@ -1,3 +1,5 @@
+import json
+
 import paho.mqtt.client as mqtt
 
 
@@ -8,6 +10,22 @@ MQTT_KEEPALIVE_SECONDS = 60
 
 MQTT_TOPIC = "santa-maria/telemetry/#"
 MQTT_QOS = 0
+
+
+def parse_payload(payload: bytes) -> dict | None:
+    try:
+        payload_text = payload.decode("utf-8")
+        telemetry_message = json.loads(payload_text)
+
+    except (UnicodeDecodeError, json.JSONDecodeError) as error:
+        print(f"Rejected invalid telemetry payload: {error}")
+        return None
+
+    if not isinstance(telemetry_message, dict):
+        print("Rejected telemetry payload: expected a JSON object")
+        return None
+
+    return telemetry_message
 
 
 def on_connect(
@@ -42,10 +60,15 @@ def on_message(
     _userdata,
     message: mqtt.MQTTMessage,
 ) -> None:
-    topic = message.topic
-    payload = message.payload.decode("utf-8")
+    telemetry_message = parse_payload(message.payload)
 
-    print(f"Received from {topic}: {payload}")
+    if telemetry_message is None:
+        return
+
+    print(
+        f"Received valid telemetry from {message.topic}: "
+        f"{telemetry_message}"
+    )
 
 
 def create_mqtt_client() -> mqtt.Client:
