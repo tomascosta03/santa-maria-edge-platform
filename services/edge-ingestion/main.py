@@ -49,6 +49,32 @@ def validate_telemetry_message(telemetry_message: dict) -> bool:
         )
         return False
 
+    for field_name in ("device_id", "metric", "unit"):
+        field_value = telemetry_message[field_name]
+
+        if not isinstance(field_value, str):
+            print(
+                f"Rejected telemetry message: "
+                f"field '{field_name}' must be a string"
+            )
+            return False
+
+        if not field_value.strip():
+            print(
+                f"Rejected telemetry message: "
+                f"field '{field_name}' cannot be empty"
+            )
+            return False
+
+    value = telemetry_message["value"]
+
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        print(
+            "Rejected telemetry message: "
+            "field 'value' must be a number"
+        )
+        return False
+
     return True
 
 
