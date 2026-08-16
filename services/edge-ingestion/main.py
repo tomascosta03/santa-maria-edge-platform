@@ -23,6 +23,10 @@ SUPPORTED_METRIC_UNITS = {
     "temperature": {"celsius"},
 }
 
+ANOMALY_RANGES = {
+    "temperature": (-10.0, 50.0),
+}
+
 def parse_payload(payload: bytes) -> dict | None:
     try:
         payload_text = payload.decode("utf-8")
@@ -104,6 +108,15 @@ def validate_telemetry_message(telemetry_message: dict) -> bool:
     return True
 
 
+def is_anomalous_telemetry(telemetry_message: dict) -> bool:
+    metric = telemetry_message["metric"]
+    value = telemetry_message["value"]
+
+    min_value, max_value = ANOMALY_RANGES[metric]
+
+    return not (min_value <= value <= max_value)
+
+
 def on_connect(
     client: mqtt.Client,
     _userdata,
@@ -143,6 +156,12 @@ def on_message(
 
     if not validate_telemetry_message(telemetry_message):
         return
+
+    if is_anomalous_telemetry(telemetry_message):
+        print(
+            f"Anomalous telemetry detected from {message.topic}: "
+            f"{telemetry_message}"
+        )
 
     print(
         f"Received valid telemetry from {message.topic}: "
