@@ -1,6 +1,8 @@
 import json
+import os
 
 import paho.mqtt.client as mqtt
+import psycopg
 
 
 MQTT_CLIENT_ID = "edge-ingestion"
@@ -10,6 +12,12 @@ MQTT_KEEPALIVE_SECONDS = 60
 
 MQTT_TOPIC = "santa-maria/telemetry/#"
 MQTT_QOS = 0
+
+POSTGRES_HOST = "localhost"
+POSTGRES_PORT = 5432
+POSTGRES_DB = os.environ.get("EDGE_POSTGRES_DB", "santamaria_edge")
+POSTGRES_USER = os.environ.get("EDGE_POSTGRES_USER", "santamaria")
+POSTGRES_PASSWORD = os.environ.get("EDGE_POSTGRES_PASSWORD", "")
 
 
 REQUIRED_TELEMETRY_FIELDS = {
@@ -117,6 +125,39 @@ def is_anomalous_telemetry(telemetry_message: dict) -> bool:
     return not (min_value <= value <= max_value)
 
 
+def create_postgres_connection() -> psycopg.Connection:
+    return psycopg.connect(
+        host=POSTGRES_HOST,
+        port=POSTGRES_PORT,
+        dbname=POSTGRES_DB,
+        user=POSTGRES_USER,
+        password=POSTGRES_PASSWORD,
+    )
+
+
+def persist_telemetry(
+    connection: psycopg.Connection,
+    telemetry_message: dict,
+    is_anomalous: bool,
+) -> None:
+    with connection.cursor() as cursor:
+        cursor.execute(
+            """
+            INSERT INTO telemetry (device_id, metric, value, unit, is_anomalous)
+            VALUES (%s, %s, %s, %s, %s)
+            """,
+            (
+                telemetry_message["device_id"],
+                telemetry_message["metric"],
+                telemetry_message["value"],
+                telemetry_message["unit"],
+                is_anomalous,
+            ),
+        )
+
+    connection.commit()
+
+
 def on_connect(
     client: mqtt.Client,
     _userdata,
@@ -146,7 +187,7 @@ def on_connect(
 
 def on_message(
     _client: mqtt.Client,
-    _userdata,
+    postgres_connection: psycopg.Connection,
     message: mqtt.MQTTMessage,
 ) -> None:
     telemetry_message = parse_payload(message.payload)
@@ -157,11 +198,15 @@ def on_message(
     if not validate_telemetry_message(telemetry_message):
         return
 
-    if is_anomalous_telemetry(telemetry_message):
+    anomalous = is_anomalous_telemetry(telemetry_message)
+
+    if anomalous:
         print(
             f"Anomalous telemetry detected from {message.topic}: "
             f"{telemetry_message}"
         )
+
+    persist_telemetry(postgres_connection, telemetry_message, anomalous)
 
     print(
         f"Received valid telemetry from {message.topic}: "
@@ -169,12 +214,13 @@ def on_message(
     )
 
 
-def create_mqtt_client() -> mqtt.Client:
+def create_mqtt_client(postgres_connection: psycopg.Connection) -> mqtt.Client:
     client = mqtt.Client(
         callback_api_version=mqtt.CallbackAPIVersion.VERSION2,
         client_id=MQTT_CLIENT_ID,
     )
 
+    client.user_data_set(postgres_connection)
     client.on_connect = on_connect
     client.on_message = on_message
 
@@ -182,7 +228,13 @@ def create_mqtt_client() -> mqtt.Client:
 
 
 def main() -> None:
-    mqtt_client = create_mqtt_client()
+    print(
+        f"Connecting to PostgreSQL at "
+        f"{POSTGRES_HOST}:{POSTGRES_PORT}/{POSTGRES_DB}..."
+    )
+    postgres_connection = create_postgres_connection()
+
+    mqtt_client = create_mqtt_client(postgres_connection)
 
     try:
         print(
@@ -203,6 +255,7 @@ def main() -> None:
 
     finally:
         mqtt_client.disconnect()
+        postgres_connection.close()
 
 
 if __name__ == "__main__":
