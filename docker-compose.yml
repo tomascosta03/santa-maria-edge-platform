@@ -1,0 +1,22 @@
+services:
+  mosquitto:
+    image: eclipse-mosquitto:2
+    ports:
+      - "1883:1883"
+    volumes:
+      - ./infrastructure/mosquitto/mosquitto.conf:/mosquitto/config/mosquitto.conf:ro
+
+  postgres-edge:
+    image: postgres:16
+    environment:
+      POSTGRES_DB: ${EDGE_POSTGRES_DB}
+      POSTGRES_USER: ${EDGE_POSTGRES_USER}
+      POSTGRES_PASSWORD: ${EDGE_POSTGRES_PASSWORD}
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres-edge-data:/var/lib/postgresql/data
+      - ./infrastructure/postgres/edge/init.sql:/docker-entrypoint-initdb.d/init.sql:ro
+
+volumes:
+  postgres-edge-data:

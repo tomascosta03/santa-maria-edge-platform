@@ -175,16 +175,19 @@ tests/
 
 ## Roadmap
 
-- [ ] MQTT Broker
-- [ ] Sensor Simulator
-- [ ] Edge Ingestion Service
-- [ ] PostgreSQL Persistence
+- [x] MQTT Broker
+- [x] Sensor Simulator
+- [x] Edge Ingestion Service
+- [x] PostgreSQL Persistence (Edge)
+- [ ] Synchronization Queue (Outbox Pattern)
+- [ ] Edge Synchronization Service
 - [ ] Cloud Synchronization
 - [ ] FastAPI
+- [ ] PostgreSQL Persistence (Cloud)
 - [ ] Prometheus
 - [ ] Grafana
 - [ ] OpenTelemetry
-- [ ] Docker Compose
+- [ ] Docker Compose for application services
 - [ ] Kubernetes
 - [ ] Helm
 
@@ -194,7 +197,80 @@ tests/
 
 This project is currently under active development.
 
-The first milestone focuses on building a resilient Edge platform capable of receiving telemetry from simulated IoT devices through MQTT.
+The first milestone is complete: the Edge platform receives telemetry from a simulated IoT device through MQTT, validates it (required fields, types and metric/unit consistency), flags anomalous readings, and persists valid messages to a local PostgreSQL database.
+
+Mosquitto and PostgreSQL currently run through Docker Compose (`infrastructure/`); the `sensor-simulator` and `edge-ingestion` services still run natively with Python, which will change once they are containerized.
+
+The next milestone focuses on resilience: introducing an outbox-style synchronization queue on the Edge, followed by an Edge Synchronization Service that pushes pending telemetry to the Cloud once connectivity is available.
+
+---
+
+## Getting Started
+
+### Prerequisites
+
+- Docker Desktop (with WSL2 backend, on Windows)
+- Python 3.13+
+
+### 1. Start the infrastructure (MQTT broker + PostgreSQL)
+
+```bash
+cp .env.example .env
+docker compose up -d
+```
+
+This starts:
+
+- Eclipse Mosquitto on `localhost:1883`
+- PostgreSQL (Edge) on `localhost:5432`, with the `telemetry` table created automatically from `infrastructure/postgres/edge/init.sql`
+
+### 2. Set up each Python service
+
+Each service under `services/` has its own virtual environment and dependencies:
+
+```bash
+cd services/edge-ingestion
+python -m venv .venv
+./.venv/Scripts/python.exe -m pip install -r requirements.txt
+```
+
+Repeat for `services/sensor-simulator`.
+
+The `edge-ingestion` service reads its PostgreSQL credentials from the `.env` file at the repository root (loaded automatically via `python-dotenv`), so no manual environment exports are needed.
+
+### 3. Run the services
+
+In one terminal:
+
+```bash
+cd services/edge-ingestion
+./.venv/Scripts/python.exe main.py
+```
+
+In another terminal:
+
+```bash
+cd services/sensor-simulator
+./.venv/Scripts/python.exe main.py
+```
+
+You should see the simulator publishing readings, and `edge-ingestion` logging each received (and, occasionally, anomalous) message.
+
+### 4. Verify persisted data
+
+```bash
+docker compose exec postgres-edge psql -U santamaria -d santamaria_edge -c "SELECT * FROM telemetry ORDER BY id DESC LIMIT 10;"
+```
+
+### 5. Stop everything
+
+Stop the two Python processes with `Ctrl+C`, then:
+
+```bash
+docker compose down
+```
+
+Add `-v` to also delete the PostgreSQL data volume.
 
 ---
 
