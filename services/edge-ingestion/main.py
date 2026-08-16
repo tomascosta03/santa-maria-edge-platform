@@ -3,6 +3,9 @@ import os
 
 import paho.mqtt.client as mqtt
 import psycopg
+from dotenv import load_dotenv
+
+load_dotenv()
 
 
 MQTT_CLIENT_ID = "edge-ingestion"
