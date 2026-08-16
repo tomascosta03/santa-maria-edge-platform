@@ -19,6 +19,10 @@ REQUIRED_TELEMETRY_FIELDS = {
     "unit",
 }
 
+SUPPORTED_METRIC_UNITS = {
+    "temperature": {"celsius"},
+}
+
 def parse_payload(payload: bytes) -> dict | None:
     try:
         payload_text = payload.decode("utf-8")
@@ -72,6 +76,28 @@ def validate_telemetry_message(telemetry_message: dict) -> bool:
         print(
             "Rejected telemetry message: "
             "field 'value' must be a number"
+        )
+        return False
+
+    metric = telemetry_message["metric"]
+    unit = telemetry_message["unit"]
+
+    allowed_units = SUPPORTED_METRIC_UNITS.get(metric)
+
+    if allowed_units is None:
+        print(
+            f"Rejected telemetry message: "
+            f"unsupported metric '{metric}'"
+        )
+        return False
+
+    if unit not in allowed_units:
+        formatted_units = ", ".join(sorted(allowed_units))
+
+        print(
+            f"Rejected telemetry message: "
+            f"unit '{unit}' is not valid for metric '{metric}'; "
+            f"expected one of: {formatted_units}"
         )
         return False
 
