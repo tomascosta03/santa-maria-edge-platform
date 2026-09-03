@@ -179,11 +179,11 @@ tests/
 - [x] Sensor Simulator
 - [x] Edge Ingestion Service
 - [x] PostgreSQL Persistence (Edge)
-- [ ] Synchronization Queue (Outbox Pattern)
-- [ ] Edge Synchronization Service
-- [ ] Cloud Synchronization
-- [ ] FastAPI
-- [ ] PostgreSQL Persistence (Cloud)
+- [x] Synchronization Queue (Outbox Pattern)
+- [x] Edge Synchronization Service
+- [x] Cloud Synchronization
+- [x] FastAPI
+- [x] PostgreSQL Persistence (Cloud)
 - [ ] Prometheus
 - [ ] Grafana
 - [ ] OpenTelemetry
@@ -199,9 +199,11 @@ This project is currently under active development.
 
 The first milestone is complete: the Edge platform receives telemetry from a simulated IoT device through MQTT, validates it (required fields, types and metric/unit consistency), flags anomalous readings, and persists valid messages to a local PostgreSQL database.
 
-Mosquitto and PostgreSQL currently run through Docker Compose (`infrastructure/`); the `sensor-simulator` and `edge-ingestion` services still run natively with Python, which will change once they are containerized.
+The second milestone is also complete: the Edge now synchronizes with the Cloud. Every telemetry row carries a `synced` flag; the Edge Synchronization Service polls for unsynced rows, pushes them in batches to a FastAPI Cloud API, and only marks them as synced after a successful response. The Cloud API upserts on `(device_id, edge_record_id)`, so retried or replayed batches never create duplicates. This was verified end-to-end, including simulating a Cloud outage: pending telemetry stayed queued on the Edge and synchronized automatically once connectivity returned, without data loss or duplication.
 
-The next milestone focuses on resilience: introducing an outbox-style synchronization queue on the Edge, followed by an Edge Synchronization Service that pushes pending telemetry to the Cloud once connectivity is available.
+Mosquitto, PostgreSQL (Edge) and PostgreSQL (Cloud) currently run through Docker Compose (`infrastructure/`); the four Python services (`sensor-simulator`, `edge-ingestion`, `edge-sync`, `cloud-api`) still run natively, which will change once they are containerized.
+
+The next milestone focuses on observability: exposing operational metrics via Prometheus and building Grafana dashboards, before moving on to Kubernetes and Helm.
 
 ---
 
@@ -223,54 +225,66 @@ This starts:
 
 - Eclipse Mosquitto on `localhost:1883`
 - PostgreSQL (Edge) on `localhost:5432`, with the `telemetry` table created automatically from `infrastructure/postgres/edge/init.sql`
+- PostgreSQL (Cloud) on `localhost:5433`, with its own `telemetry` table created from `infrastructure/postgres/cloud/init.sql`
 
 ### 2. Set up each Python service
 
-Each service under `services/` has its own virtual environment and dependencies:
+Each service under `services/` (`sensor-simulator`, `edge-ingestion`, `edge-sync`, `cloud-api`) has its own virtual environment and dependencies:
 
 ```bash
-cd services/edge-ingestion
+cd services/<service-name>
 python -m venv .venv
 ./.venv/Scripts/python.exe -m pip install -r requirements.txt
 ```
 
-Repeat for `services/sensor-simulator`.
-
-The `edge-ingestion` service reads its PostgreSQL credentials from the `.env` file at the repository root (loaded automatically via `python-dotenv`), so no manual environment exports are needed.
+All services read their configuration from the `.env` file at the repository root (loaded automatically via `python-dotenv`), so no manual environment exports are needed.
 
 ### 3. Run the services
 
-In one terminal:
+Each in its own terminal, in this order:
+
+```bash
+cd services/cloud-api
+./.venv/Scripts/python.exe -m uvicorn main:app --host 127.0.0.1 --port 8000
+```
 
 ```bash
 cd services/edge-ingestion
 ./.venv/Scripts/python.exe main.py
 ```
 
-In another terminal:
+```bash
+cd services/edge-sync
+./.venv/Scripts/python.exe main.py
+```
 
 ```bash
 cd services/sensor-simulator
 ./.venv/Scripts/python.exe main.py
 ```
 
-You should see the simulator publishing readings, and `edge-ingestion` logging each received (and, occasionally, anomalous) message.
+You should see the simulator publishing readings, `edge-ingestion` logging each received (and, occasionally, anomalous) message, and `edge-sync` reporting batches synced to the Cloud roughly every 10 seconds.
 
 ### 4. Verify persisted data
 
 ```bash
-docker compose exec postgres-edge psql -U santamaria -d santamaria_edge -c "SELECT * FROM telemetry ORDER BY id DESC LIMIT 10;"
+docker compose exec postgres-edge psql -U santamaria -d santamaria_edge -c "SELECT id, device_id, value, is_anomalous, synced FROM telemetry ORDER BY id DESC LIMIT 10;"
+docker compose exec postgres-cloud psql -U santamaria -d santamaria_cloud -c "SELECT edge_record_id, device_id, value, synced_at FROM telemetry ORDER BY id DESC LIMIT 10;"
 ```
 
-### 5. Stop everything
+### 5. Try the resilience scenario
 
-Stop the two Python processes with `Ctrl+C`, then:
+Stop `cloud-api` (`Ctrl+C`) while the other services keep running. Telemetry keeps being validated and stored on the Edge, but `edge-sync` will start logging failed sync attempts and the `synced` column will stay `false` for new rows. Restart `cloud-api`, and the next `edge-sync` cycle picks up everything that queued up in the meantime — with no duplicates in the Cloud database.
+
+### 6. Stop everything
+
+Stop the Python processes with `Ctrl+C`, then:
 
 ```bash
 docker compose down
 ```
 
-Add `-v` to also delete the PostgreSQL data volume.
+Add `-v` to also delete the PostgreSQL data volumes.
 
 ---
 
