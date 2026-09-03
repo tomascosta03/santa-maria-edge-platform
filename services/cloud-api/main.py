@@ -4,10 +4,17 @@ from datetime import datetime
 
 import psycopg
 from dotenv import load_dotenv
-from fastapi import FastAPI
+from fastapi import FastAPI, Response
+from prometheus_client import CONTENT_TYPE_LATEST, Counter, generate_latest
 from pydantic import BaseModel
 
 load_dotenv()
+
+
+RECORDS_RECEIVED_TOTAL = Counter(
+    "cloud_api_telemetry_records_received_total",
+    "Total telemetry records received from Edge nodes",
+)
 
 
 POSTGRES_HOST = "localhost"
@@ -81,8 +88,14 @@ def health() -> dict:
     return {"status": "ok"}
 
 
+@app.get("/metrics")
+def metrics() -> Response:
+    return Response(content=generate_latest(), media_type=CONTENT_TYPE_LATEST)
+
+
 @app.post("/telemetry")
 def ingest_telemetry(records: list[TelemetryRecord]) -> dict:
     persist_telemetry_batch(app.state.postgres_connection, records)
+    RECORDS_RECEIVED_TOTAL.inc(len(records))
 
     return {"received": len(records)}

@@ -4,6 +4,7 @@ import os
 import paho.mqtt.client as mqtt
 import psycopg
 from dotenv import load_dotenv
+from prometheus_client import Counter, start_http_server
 
 load_dotenv()
 
@@ -21,6 +22,29 @@ POSTGRES_PORT = 5432
 POSTGRES_DB = os.environ.get("EDGE_POSTGRES_DB", "santamaria_edge")
 POSTGRES_USER = os.environ.get("EDGE_POSTGRES_USER", "santamaria")
 POSTGRES_PASSWORD = os.environ.get("EDGE_POSTGRES_PASSWORD", "")
+
+METRICS_PORT = 8001
+
+MESSAGES_RECEIVED_TOTAL = Counter(
+    "edge_ingestion_messages_received_total",
+    "Total MQTT messages received",
+)
+MESSAGES_PARSE_FAILED_TOTAL = Counter(
+    "edge_ingestion_messages_parse_failed_total",
+    "Total messages rejected for invalid JSON payloads",
+)
+MESSAGES_VALIDATION_FAILED_TOTAL = Counter(
+    "edge_ingestion_messages_validation_failed_total",
+    "Total messages rejected by telemetry validation",
+)
+ANOMALIES_DETECTED_TOTAL = Counter(
+    "edge_ingestion_anomalies_detected_total",
+    "Total anomalous telemetry readings detected",
+)
+MESSAGES_PERSISTED_TOTAL = Counter(
+    "edge_ingestion_messages_persisted_total",
+    "Total telemetry messages persisted to PostgreSQL",
+)
 
 
 REQUIRED_TELEMETRY_FIELDS = {
@@ -193,23 +217,29 @@ def on_message(
     postgres_connection: psycopg.Connection,
     message: mqtt.MQTTMessage,
 ) -> None:
+    MESSAGES_RECEIVED_TOTAL.inc()
+
     telemetry_message = parse_payload(message.payload)
 
     if telemetry_message is None:
+        MESSAGES_PARSE_FAILED_TOTAL.inc()
         return
 
     if not validate_telemetry_message(telemetry_message):
+        MESSAGES_VALIDATION_FAILED_TOTAL.inc()
         return
 
     anomalous = is_anomalous_telemetry(telemetry_message)
 
     if anomalous:
+        ANOMALIES_DETECTED_TOTAL.inc()
         print(
             f"Anomalous telemetry detected from {message.topic}: "
             f"{telemetry_message}"
         )
 
     persist_telemetry(postgres_connection, telemetry_message, anomalous)
+    MESSAGES_PERSISTED_TOTAL.inc()
 
     print(
         f"Received valid telemetry from {message.topic}: "
@@ -231,6 +261,9 @@ def create_mqtt_client(postgres_connection: psycopg.Connection) -> mqtt.Client:
 
 
 def main() -> None:
+    start_http_server(METRICS_PORT)
+    print(f"Exposing Prometheus metrics on :{METRICS_PORT}/metrics")
+
     print(
         f"Connecting to PostgreSQL at "
         f"{POSTGRES_HOST}:{POSTGRES_PORT}/{POSTGRES_DB}..."
