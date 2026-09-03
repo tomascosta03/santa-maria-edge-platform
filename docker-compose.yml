@@ -30,6 +30,31 @@ services:
       - postgres-cloud-data:/var/lib/postgresql/data
       - ./infrastructure/postgres/cloud/init.sql:/docker-entrypoint-initdb.d/init.sql:ro
 
+  prometheus:
+    image: prom/prometheus:latest
+    ports:
+      - "9090:9090"
+    volumes:
+      - ./infrastructure/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+
+  grafana:
+    image: grafana/grafana:latest
+    ports:
+      - "3000:3000"
+    environment:
+      GF_SECURITY_ADMIN_USER: ${GRAFANA_ADMIN_USER}
+      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_ADMIN_PASSWORD}
+      EDGE_POSTGRES_DB: ${EDGE_POSTGRES_DB}
+      EDGE_POSTGRES_USER: ${EDGE_POSTGRES_USER}
+      EDGE_POSTGRES_PASSWORD: ${EDGE_POSTGRES_PASSWORD}
+    volumes:
+      - ./infrastructure/grafana/provisioning:/etc/grafana/provisioning:ro
+      - grafana-data:/var/lib/grafana
+    depends_on:
+      - prometheus
+      - postgres-edge
+
 volumes:
   postgres-edge-data:
   postgres-cloud-data:
+  grafana-data:
