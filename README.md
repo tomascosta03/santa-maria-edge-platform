@@ -184,8 +184,8 @@ tests/
 - [x] Cloud Synchronization
 - [x] FastAPI
 - [x] PostgreSQL Persistence (Cloud)
-- [ ] Prometheus
-- [ ] Grafana
+- [x] Prometheus
+- [x] Grafana
 - [ ] OpenTelemetry
 - [ ] Docker Compose for application services
 - [ ] Kubernetes
@@ -201,9 +201,11 @@ The first milestone is complete: the Edge platform receives telemetry from a sim
 
 The second milestone is also complete: the Edge now synchronizes with the Cloud. Every telemetry row carries a `synced` flag; the Edge Synchronization Service polls for unsynced rows, pushes them in batches to a FastAPI Cloud API, and only marks them as synced after a successful response. The Cloud API upserts on `(device_id, edge_record_id)`, so retried or replayed batches never create duplicates. This was verified end-to-end, including simulating a Cloud outage: pending telemetry stayed queued on the Edge and synchronized automatically once connectivity returned, without data loss or duplication.
 
-Mosquitto, PostgreSQL (Edge) and PostgreSQL (Cloud) currently run through Docker Compose (`infrastructure/`); the four Python services (`sensor-simulator`, `edge-ingestion`, `edge-sync`, `cloud-api`) still run natively, which will change once they are containerized.
+The third milestone, observability, is also complete. `edge-ingestion`, `edge-sync` and `cloud-api` each expose a Prometheus `/metrics` endpoint with counters for messages received, rejected, flagged as anomalous, persisted, synced and sync failures. Prometheus scrapes all three; Grafana is provisioned with two datasources — Prometheus for those service metrics, and PostgreSQL Edge queried directly for the pending sync queue depth, since that number already lives in the `telemetry` table and does not need to be duplicated as a metric. An overview dashboard ships versioned in the repo (`infrastructure/grafana/provisioning/dashboards/json/`).
 
-The next milestone focuses on observability: exposing operational metrics via Prometheus and building Grafana dashboards, before moving on to Kubernetes and Helm.
+Mosquitto, PostgreSQL (Edge), PostgreSQL (Cloud), Prometheus and Grafana currently run through Docker Compose (`infrastructure/`); the four Python services (`sensor-simulator`, `edge-ingestion`, `edge-sync`, `cloud-api`) still run natively, which will change once they are containerized.
+
+The next milestone focuses on tracing: adding OpenTelemetry to follow a single telemetry record across the Edge and Cloud, before moving on to Kubernetes and Helm.
 
 ---
 
@@ -226,6 +228,8 @@ This starts:
 - Eclipse Mosquitto on `localhost:1883`
 - PostgreSQL (Edge) on `localhost:5432`, with the `telemetry` table created automatically from `infrastructure/postgres/edge/init.sql`
 - PostgreSQL (Cloud) on `localhost:5433`, with its own `telemetry` table created from `infrastructure/postgres/cloud/init.sql`
+- Prometheus on `localhost:9090`, configured to scrape the three Python services running on the host (`infrastructure/prometheus/prometheus.yml`)
+- Grafana on `localhost:3000` (login with `GRAFANA_ADMIN_USER` / `GRAFANA_ADMIN_PASSWORD` from `.env`), pre-provisioned with the Prometheus and PostgreSQL Edge datasources and the "Santa Maria Edge Platform - Overview" dashboard
 
 ### 2. Set up each Python service
 
@@ -276,7 +280,19 @@ docker compose exec postgres-cloud psql -U santamaria -d santamaria_cloud -c "SE
 
 Stop `cloud-api` (`Ctrl+C`) while the other services keep running. Telemetry keeps being validated and stored on the Edge, but `edge-sync` will start logging failed sync attempts and the `synced` column will stay `false` for new rows. Restart `cloud-api`, and the next `edge-sync` cycle picks up everything that queued up in the meantime — with no duplicates in the Cloud database.
 
-### 6. Stop everything
+### 6. Watch it in Grafana
+
+Open `http://localhost:3000`, log in, and open the "Santa Maria Edge Platform - Overview" dashboard. While the services and simulator are running you should see the message/anomaly/sync rates move, and the "Pending Sync Queue" panel spike when you stop `cloud-api` and drain back to zero once you restart it.
+
+You can also query the raw metrics directly, without Grafana:
+
+```bash
+curl http://localhost:8001/metrics   # edge-ingestion
+curl http://localhost:8002/metrics   # edge-sync
+curl http://localhost:8000/metrics   # cloud-api
+```
+
+### 7. Stop everything
 
 Stop the Python processes with `Ctrl+C`, then:
 

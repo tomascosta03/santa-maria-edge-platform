@@ -4,6 +4,7 @@ import time
 import psycopg
 import requests
 from dotenv import load_dotenv
+from prometheus_client import Counter, start_http_server
 
 load_dotenv()
 
@@ -19,6 +20,17 @@ CLOUD_REQUEST_TIMEOUT_SECONDS = 10
 
 SYNC_INTERVAL_SECONDS = 10
 SYNC_BATCH_SIZE = 100
+
+METRICS_PORT = 8002
+
+RECORDS_SYNCED_TOTAL = Counter(
+    "edge_sync_records_synced_total",
+    "Total telemetry records successfully synced to the Cloud",
+)
+SYNC_ATTEMPTS_FAILED_TOTAL = Counter(
+    "edge_sync_attempts_failed_total",
+    "Total sync attempts that failed to reach the Cloud API",
+)
 
 
 def create_postgres_connection() -> psycopg.Connection:
@@ -95,16 +107,21 @@ def sync_once(connection: psycopg.Connection) -> int:
     payload = build_cloud_payload(telemetry_rows)
 
     if not send_to_cloud(payload):
+        SYNC_ATTEMPTS_FAILED_TOTAL.inc()
         return 0
 
     telemetry_ids = [row["id"] for row in telemetry_rows]
     mark_as_synced(connection, telemetry_ids)
+    RECORDS_SYNCED_TOTAL.inc(len(telemetry_ids))
 
     print(f"Synced {len(telemetry_ids)} telemetry record(s) to the Cloud")
     return len(telemetry_ids)
 
 
 def main() -> None:
+    start_http_server(METRICS_PORT)
+    print(f"Exposing Prometheus metrics on :{METRICS_PORT}/metrics")
+
     postgres_connection = create_postgres_connection()
 
     try:
