@@ -36,6 +36,8 @@ spec:
             - name: GF_SECURITY_ADMIN_PASSWORD
               valueFrom:
                 secretKeyRef: { name: santa-maria-secrets, key: GRAFANA_ADMIN_PASSWORD }
+            - name: GF_DASHBOARDS_DEFAULT_HOME_DASHBOARD_PATH
+              value: /etc/grafana/provisioning/dashboards/json/santa-maria-overview.json
             - name: EDGE_POSTGRES_DB
               valueFrom:
                 secretKeyRef: { name: santa-maria-secrets, key: EDGE_POSTGRES_DB }
