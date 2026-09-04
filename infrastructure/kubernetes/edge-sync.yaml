@@ -1,0 +1,49 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: edge-sync
+  namespace: santa-maria
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: edge-sync
+  template:
+    metadata:
+      labels:
+        app: edge-sync
+    spec:
+      containers:
+        - name: edge-sync
+          image: santa-maria/edge-sync:latest
+          imagePullPolicy: Never
+          ports:
+            - containerPort: 8002
+          env:
+            - name: POSTGRES_HOST
+              value: postgres-edge
+            - name: CLOUD_API_URL
+              value: http://cloud-api:8000/telemetry
+            - name: OTEL_EXPORTER_OTLP_ENDPOINT
+              value: http://jaeger:4318/v1/traces
+            - name: EDGE_POSTGRES_DB
+              valueFrom:
+                secretKeyRef: { name: santa-maria-secrets, key: EDGE_POSTGRES_DB }
+            - name: EDGE_POSTGRES_USER
+              valueFrom:
+                secretKeyRef: { name: santa-maria-secrets, key: EDGE_POSTGRES_USER }
+            - name: EDGE_POSTGRES_PASSWORD
+              valueFrom:
+                secretKeyRef: { name: santa-maria-secrets, key: EDGE_POSTGRES_PASSWORD }
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: edge-sync
+  namespace: santa-maria
+spec:
+  selector:
+    app: edge-sync
+  ports:
+    - port: 8002
+      targetPort: 8002
