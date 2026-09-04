@@ -12,12 +12,14 @@
       "title": "Pending Sync Queue (Edge)",
       "description": "Telemetry rows in postgres-edge with synced = false",
       "gridPos": { "x": 0, "y": 0, "w": 6, "h": 8 },
-      "datasource": { "type": "postgres", "uid": "postgres-edge" },
+      "datasource": { "type": "grafana-postgresql-datasource", "uid": "postgres-edge" },
       "targets": [
         {
-          "datasource": { "type": "postgres", "uid": "postgres-edge" },
+          "datasource": { "type": "grafana-postgresql-datasource", "uid": "postgres-edge" },
           "format": "table",
           "rawSql": "SELECT count(*) AS value FROM telemetry WHERE synced = false",
+          "editorMode": "code",
+          "rawQuery": true,
           "refId": "A"
         }
       ],
