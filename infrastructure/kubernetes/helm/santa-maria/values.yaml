@@ -1,0 +1,11 @@
+images:
+  sensorSimulator: santa-maria/sensor-simulator:latest
+  edgeIngestion: santa-maria/edge-ingestion:latest
+  edgeSync: santa-maria/edge-sync:latest
+  cloudApi: santa-maria/cloud-api:latest
+
+nodePorts:
+  grafana: 30000
+  prometheus: 30090
+  jaeger: 30686
+  cloudApi: 30800

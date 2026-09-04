@@ -1,30 +1,8 @@
 apiVersion: v1
-kind: ConfigMap
-metadata:
-  name: postgres-edge-init
-  namespace: santa-maria
-data:
-  init.sql: |
-    CREATE TABLE IF NOT EXISTS telemetry (
-        id BIGSERIAL PRIMARY KEY,
-        device_id TEXT NOT NULL,
-        metric TEXT NOT NULL,
-        value DOUBLE PRECISION NOT NULL,
-        unit TEXT NOT NULL,
-        is_anomalous BOOLEAN NOT NULL DEFAULT FALSE,
-        received_at TIMESTAMPTZ NOT NULL DEFAULT now(),
-        synced BOOLEAN NOT NULL DEFAULT FALSE
-    );
-
-    CREATE INDEX IF NOT EXISTS idx_telemetry_unsynced
-        ON telemetry (id)
-        WHERE synced = FALSE;
----
-apiVersion: v1
 kind: PersistentVolumeClaim
 metadata:
   name: postgres-edge-data
-  namespace: santa-maria
+  namespace: {{ .Release.Namespace }}
 spec:
   accessModes: ["ReadWriteOnce"]
   resources:
@@ -35,7 +13,7 @@ apiVersion: apps/v1
 kind: Deployment
 metadata:
   name: postgres-edge
-  namespace: santa-maria
+  namespace: {{ .Release.Namespace }}
 spec:
   replicas: 1
   selector:
@@ -79,7 +57,7 @@ apiVersion: v1
 kind: Service
 metadata:
   name: postgres-edge
-  namespace: santa-maria
+  namespace: {{ .Release.Namespace }}
 spec:
   selector:
     app: postgres-edge
