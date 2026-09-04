@@ -150,7 +150,7 @@ activemq-data/
 # Environments
 .env
 .envrc
-infrastructure/kubernetes/secrets.yaml
+infrastructure/kubernetes/helm/santa-maria/values-secrets.yaml
 .venv
 env/
 venv/

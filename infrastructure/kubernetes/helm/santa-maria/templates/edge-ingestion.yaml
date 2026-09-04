@@ -2,7 +2,7 @@ apiVersion: apps/v1
 kind: Deployment
 metadata:
   name: edge-ingestion
-  namespace: santa-maria
+  namespace: {{ .Release.Namespace }}
 spec:
   replicas: 1
   selector:
@@ -15,7 +15,7 @@ spec:
     spec:
       containers:
         - name: edge-ingestion
-          image: santa-maria/edge-ingestion:latest
+          image: {{ .Values.images.edgeIngestion }}
           imagePullPolicy: Never
           ports:
             - containerPort: 8001
@@ -40,7 +40,7 @@ apiVersion: v1
 kind: Service
 metadata:
   name: edge-ingestion
-  namespace: santa-maria
+  namespace: {{ .Release.Namespace }}
 spec:
   selector:
     app: edge-ingestion

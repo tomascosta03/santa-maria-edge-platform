@@ -2,7 +2,7 @@ apiVersion: apps/v1
 kind: Deployment
 metadata:
   name: sensor-simulator
-  namespace: santa-maria
+  namespace: {{ .Release.Namespace }}
 spec:
   replicas: 1
   selector:
@@ -15,7 +15,7 @@ spec:
     spec:
       containers:
         - name: sensor-simulator
-          image: santa-maria/sensor-simulator:latest
+          image: {{ .Values.images.sensorSimulator }}
           imagePullPolicy: Never
           env:
             - name: MQTT_BROKER_HOST

@@ -2,7 +2,7 @@ apiVersion: apps/v1
 kind: Deployment
 metadata:
   name: edge-sync
-  namespace: santa-maria
+  namespace: {{ .Release.Namespace }}
 spec:
   replicas: 1
   selector:
@@ -15,7 +15,7 @@ spec:
     spec:
       containers:
         - name: edge-sync
-          image: santa-maria/edge-sync:latest
+          image: {{ .Values.images.edgeSync }}
           imagePullPolicy: Never
           ports:
             - containerPort: 8002
@@ -40,7 +40,7 @@ apiVersion: v1
 kind: Service
 metadata:
   name: edge-sync
-  namespace: santa-maria
+  namespace: {{ .Release.Namespace }}
 spec:
   selector:
     app: edge-sync

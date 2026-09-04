@@ -134,9 +134,12 @@ services/
 └── cloud-api/
 
 infrastructure/
-├── mosquitto/
-├── kubernetes/
-└── monitoring/
+└── kubernetes/
+    ├── kind-config.yaml       # local cluster definition
+    └── helm/santa-maria/      # the chart: Chart.yaml, values.yaml, templates/
+        └── files/             # config shared with Docker Compose (mosquitto.conf, prometheus.yml, ...)
+
+docker-compose.yml
 
 docs/
 
@@ -189,7 +192,7 @@ tests/
 - [x] OpenTelemetry
 - [x] Docker Compose for application services
 - [x] Kubernetes
-- [ ] Helm
+- [x] Helm
 
 ---
 
@@ -207,11 +210,11 @@ All four Python services now run as containers alongside the rest of the infrast
 
 The fourth milestone adds distributed tracing with OpenTelemetry, exported to Jaeger. This was done in two tiers, on purpose: `edge-sync -> cloud-api` is a real synchronous HTTP call, so it gets full automatic trace propagation (`requests` on the client, FastAPI and psycopg on the server) — a single trace shows the sync batch, the HTTP call, the Cloud API handling it, and the resulting PostgreSQL insert, all connected. `sensor-simulator` and `edge-ingestion` each get their own span per message instead of being stitched into that same trace, because MQTT has no standard mechanism for carrying trace context across the broker, and the sync queue is asynchronous by design (a telemetry row can sit unsynced for an arbitrary amount of time before `edge-sync` picks it up) — a live parent/child span across either boundary would misrepresent what actually happened. Linking those into one end-to-end trace (via manual context propagation and span links) is a natural next step if deeper tracing is needed later.
 
-The fifth milestone ports the whole platform to Kubernetes, using [`kind`](https://kind.sigs.k8s.io/) (Kubernetes-in-Docker) rather than Docker Desktop's built-in Kubernetes: `kind` is scriptable end-to-end from the command line and is the tool the Kubernetes project itself uses for conformance testing, which fits better with the Infrastructure-as-Code approach used throughout this repo than a GUI toggle would. All ten workloads (2x PostgreSQL, Mosquitto, Prometheus, Grafana, Jaeger, and the four Python services) run as Deployments in a `santa-maria` namespace, manifests versioned under `infrastructure/kubernetes/`. Configuration follows the same two patterns already used for Docker Compose: `ConfigMap`s for the Mosquitto/Prometheus/Grafana config files, and a `Secret` for credentials, provided as a committed `secrets.example.yaml` template plus a gitignored `secrets.yaml` — mirroring `.env.example` / `.env`. The four application images are built locally and loaded into the cluster with `kind load docker-image`, since there is no registry involved yet.
+The fifth milestone ports the whole platform to Kubernetes, using [`kind`](https://kind.sigs.k8s.io/) (Kubernetes-in-Docker) rather than Docker Desktop's built-in Kubernetes: `kind` is scriptable end-to-end from the command line and is the tool the Kubernetes project itself uses for conformance testing, which fits better with the Infrastructure-as-Code approach used throughout this repo than a GUI toggle would. All ten workloads (2x PostgreSQL, Mosquitto, Prometheus, Grafana, Jaeger, and the four Python services) run as Deployments in a `santa-maria` namespace.
 
-One deliberate tradeoff: the Mosquitto/Prometheus/Grafana configuration is currently duplicated between `infrastructure/*/`(used by Docker Compose) and inline inside the Kubernetes ConfigMaps, since there is no templating layer yet connecting the two. That duplication is exactly what the next milestone, Helm, exists to remove.
+The sixth and final planned milestone packages those manifests as a Helm chart (`infrastructure/kubernetes/helm/santa-maria/`), replacing the ten separate `kubectl apply -f` commands with a single `helm install`. It also removes a tradeoff called out during the Kubernetes milestone: the raw manifests had the Mosquitto/Prometheus/Grafana config text copy-pasted straight into the Kubernetes `ConfigMap`s, duplicating the files Docker Compose already used. Those config files (plus the Postgres `init.sql` scripts) now live once, under the chart's `files/` directory, and both Docker Compose (via bind mount) and the Helm templates (via `.Files.Get`) read the same source. Credentials follow the same split as `.env`/`.env.example`, adapted to Helm's own layering mechanism: non-sensitive defaults live in the committed `values.yaml`, and credentials live in a `values-secrets.example.yaml` template, copied to a gitignored `values-secrets.yaml` and passed at install time with `helm install ... -f values-secrets.yaml`.
 
-The next milestone moves to Helm, to package these manifests and stop hand-duplicating configuration between Compose and Kubernetes.
+This completes the roadmap laid out at the start of the project. Further work — deeper end-to-end tracing across the MQTT and sync-queue boundaries, publishing the application images to a registry instead of `kind load`-ing them, CI, automated tests — will be captured as new Architecture Decision Records below rather than as a fixed roadmap.
 
 ---
 
@@ -313,7 +316,7 @@ This is an alternative to Docker Compose — stop the Compose stack first (`dock
 
 ### Prerequisites
 
-- [`kind`](https://kind.sigs.k8s.io/) and `kubectl`
+- [`kind`](https://kind.sigs.k8s.io/), `kubectl`, and [Helm](https://helm.sh/)
 
 ### 1. Create the cluster
 
@@ -336,16 +339,22 @@ docker build -t santa-maria/cloud-api:latest ./services/cloud-api
 kind load docker-image santa-maria/sensor-simulator:latest santa-maria/edge-ingestion:latest santa-maria/edge-sync:latest santa-maria/cloud-api:latest --name santa-maria
 ```
 
-### 3. Set up secrets and apply the manifests
+### 3. Set up secrets and install the chart
 
 ```bash
-cd infrastructure/kubernetes
-cp secrets.example.yaml secrets.yaml   # edit with real values first, if not using the defaults
+cd infrastructure/kubernetes/helm/santa-maria
+cp values-secrets.example.yaml values-secrets.yaml   # edit with real values first, if not using the defaults
 
-kubectl apply -f namespace.yaml
-kubectl apply -f secrets.yaml -f configmaps.yaml -f grafana-dashboard-configmap.yaml
-kubectl apply -f postgres-edge.yaml -f postgres-cloud.yaml -f mosquitto.yaml -f prometheus.yaml -f jaeger.yaml -f grafana.yaml -f cloud-api.yaml -f edge-ingestion.yaml -f edge-sync.yaml -f sensor-simulator.yaml
+helm install santa-maria . -f values-secrets.yaml --namespace santa-maria --create-namespace
 ```
+
+That one command replaces what used to be ten separate `kubectl apply -f` calls. To change something later (an image tag, a NodePort, a credential) without hand-editing manifests, edit `values.yaml` / `values-secrets.yaml` and run:
+
+```bash
+helm upgrade santa-maria . -f values-secrets.yaml --namespace santa-maria
+```
+
+If an upgrade breaks something, `helm rollback santa-maria --namespace santa-maria` returns to the previous release.
 
 ### 4. Check everything is healthy
 
@@ -369,6 +378,7 @@ kubectl exec -n santa-maria deploy/postgres-cloud -- psql -U santamaria -d santa
 ### 7. Tear down
 
 ```bash
+helm uninstall santa-maria --namespace santa-maria
 kind delete cluster --name santa-maria
 ```
 
