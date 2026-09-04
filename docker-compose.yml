@@ -54,12 +54,23 @@ services:
       - prometheus
       - postgres-edge
 
+  jaeger:
+    image: jaegertracing/all-in-one:latest
+    environment:
+      COLLECTOR_OTLP_ENABLED: "true"
+    ports:
+      - "16686:16686"
+      - "4317:4317"
+      - "4318:4318"
+
   sensor-simulator:
     build: ./services/sensor-simulator
     environment:
       MQTT_BROKER_HOST: mosquitto
+      OTEL_EXPORTER_OTLP_ENDPOINT: http://jaeger:4318/v1/traces
     depends_on:
       - mosquitto
+      - jaeger
     restart: unless-stopped
 
   edge-ingestion:
@@ -70,11 +81,13 @@ services:
       EDGE_POSTGRES_DB: ${EDGE_POSTGRES_DB}
       EDGE_POSTGRES_USER: ${EDGE_POSTGRES_USER}
       EDGE_POSTGRES_PASSWORD: ${EDGE_POSTGRES_PASSWORD}
+      OTEL_EXPORTER_OTLP_ENDPOINT: http://jaeger:4318/v1/traces
     ports:
       - "8001:8001"
     depends_on:
       - mosquitto
       - postgres-edge
+      - jaeger
     restart: unless-stopped
 
   cloud-api:
@@ -85,10 +98,12 @@ services:
       CLOUD_POSTGRES_DB: ${CLOUD_POSTGRES_DB}
       CLOUD_POSTGRES_USER: ${CLOUD_POSTGRES_USER}
       CLOUD_POSTGRES_PASSWORD: ${CLOUD_POSTGRES_PASSWORD}
+      OTEL_EXPORTER_OTLP_ENDPOINT: http://jaeger:4318/v1/traces
     ports:
       - "8000:8000"
     depends_on:
       - postgres-cloud
+      - jaeger
     restart: unless-stopped
 
   edge-sync:
@@ -99,11 +114,13 @@ services:
       EDGE_POSTGRES_USER: ${EDGE_POSTGRES_USER}
       EDGE_POSTGRES_PASSWORD: ${EDGE_POSTGRES_PASSWORD}
       CLOUD_API_URL: http://cloud-api:8000/telemetry
+      OTEL_EXPORTER_OTLP_ENDPOINT: http://jaeger:4318/v1/traces
     ports:
       - "8002:8002"
     depends_on:
       - postgres-edge
       - cloud-api
+      - jaeger
     restart: unless-stopped
 
 volumes:
