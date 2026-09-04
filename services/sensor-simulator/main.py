@@ -1,14 +1,18 @@
 import json
+import os
 import random
 import time
 
 import paho.mqtt.client as mqtt
+from dotenv import load_dotenv
+
+load_dotenv()
 
 
 DEVICE_ID = "sensor-001"
 
 MQTT_CLIENT_ID = f"{DEVICE_ID}-simulator"
-MQTT_BROKER_HOST = "localhost"
+MQTT_BROKER_HOST = os.environ.get("MQTT_BROKER_HOST", "localhost")
 MQTT_BROKER_PORT = 1883
 MQTT_KEEPALIVE_SECONDS = 60
 MQTT_TOPIC = f"santa-maria/telemetry/temperature/{DEVICE_ID}"

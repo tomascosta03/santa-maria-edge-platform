@@ -9,7 +9,7 @@ from prometheus_client import Counter, start_http_server
 load_dotenv()
 
 
-POSTGRES_HOST = "localhost"
+POSTGRES_HOST = os.environ.get("POSTGRES_HOST", "localhost")
 POSTGRES_PORT = 5432
 POSTGRES_DB = os.environ.get("EDGE_POSTGRES_DB", "santamaria_edge")
 POSTGRES_USER = os.environ.get("EDGE_POSTGRES_USER", "santamaria")
