@@ -18,5 +18,6 @@ datasources:
     secureJsonData:
       password: $EDGE_POSTGRES_PASSWORD
     jsonData:
+      database: $EDGE_POSTGRES_DB
       sslmode: disable
       postgresVersion: 1600
