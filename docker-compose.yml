@@ -54,6 +54,58 @@ services:
       - prometheus
       - postgres-edge
 
+  sensor-simulator:
+    build: ./services/sensor-simulator
+    environment:
+      MQTT_BROKER_HOST: mosquitto
+    depends_on:
+      - mosquitto
+    restart: unless-stopped
+
+  edge-ingestion:
+    build: ./services/edge-ingestion
+    environment:
+      MQTT_BROKER_HOST: mosquitto
+      POSTGRES_HOST: postgres-edge
+      EDGE_POSTGRES_DB: ${EDGE_POSTGRES_DB}
+      EDGE_POSTGRES_USER: ${EDGE_POSTGRES_USER}
+      EDGE_POSTGRES_PASSWORD: ${EDGE_POSTGRES_PASSWORD}
+    ports:
+      - "8001:8001"
+    depends_on:
+      - mosquitto
+      - postgres-edge
+    restart: unless-stopped
+
+  cloud-api:
+    build: ./services/cloud-api
+    environment:
+      POSTGRES_HOST: postgres-cloud
+      POSTGRES_PORT: "5432"
+      CLOUD_POSTGRES_DB: ${CLOUD_POSTGRES_DB}
+      CLOUD_POSTGRES_USER: ${CLOUD_POSTGRES_USER}
+      CLOUD_POSTGRES_PASSWORD: ${CLOUD_POSTGRES_PASSWORD}
+    ports:
+      - "8000:8000"
+    depends_on:
+      - postgres-cloud
+    restart: unless-stopped
+
+  edge-sync:
+    build: ./services/edge-sync
+    environment:
+      POSTGRES_HOST: postgres-edge
+      EDGE_POSTGRES_DB: ${EDGE_POSTGRES_DB}
+      EDGE_POSTGRES_USER: ${EDGE_POSTGRES_USER}
+      EDGE_POSTGRES_PASSWORD: ${EDGE_POSTGRES_PASSWORD}
+      CLOUD_API_URL: http://cloud-api:8000/telemetry
+    ports:
+      - "8002:8002"
+    depends_on:
+      - postgres-edge
+      - cloud-api
+    restart: unless-stopped
+
 volumes:
   postgres-edge-data:
   postgres-cloud-data:
