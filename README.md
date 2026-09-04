@@ -188,7 +188,7 @@ tests/
 - [x] Grafana
 - [x] OpenTelemetry
 - [x] Docker Compose for application services
-- [ ] Kubernetes
+- [x] Kubernetes
 - [ ] Helm
 
 ---
@@ -207,7 +207,11 @@ All four Python services now run as containers alongside the rest of the infrast
 
 The fourth milestone adds distributed tracing with OpenTelemetry, exported to Jaeger. This was done in two tiers, on purpose: `edge-sync -> cloud-api` is a real synchronous HTTP call, so it gets full automatic trace propagation (`requests` on the client, FastAPI and psycopg on the server) — a single trace shows the sync batch, the HTTP call, the Cloud API handling it, and the resulting PostgreSQL insert, all connected. `sensor-simulator` and `edge-ingestion` each get their own span per message instead of being stitched into that same trace, because MQTT has no standard mechanism for carrying trace context across the broker, and the sync queue is asynchronous by design (a telemetry row can sit unsynced for an arbitrary amount of time before `edge-sync` picks it up) — a live parent/child span across either boundary would misrepresent what actually happened. Linking those into one end-to-end trace (via manual context propagation and span links) is a natural next step if deeper tracing is needed later.
 
-The next milestone moves to Kubernetes and Helm.
+The fifth milestone ports the whole platform to Kubernetes, using [`kind`](https://kind.sigs.k8s.io/) (Kubernetes-in-Docker) rather than Docker Desktop's built-in Kubernetes: `kind` is scriptable end-to-end from the command line and is the tool the Kubernetes project itself uses for conformance testing, which fits better with the Infrastructure-as-Code approach used throughout this repo than a GUI toggle would. All ten workloads (2x PostgreSQL, Mosquitto, Prometheus, Grafana, Jaeger, and the four Python services) run as Deployments in a `santa-maria` namespace, manifests versioned under `infrastructure/kubernetes/`. Configuration follows the same two patterns already used for Docker Compose: `ConfigMap`s for the Mosquitto/Prometheus/Grafana config files, and a `Secret` for credentials, provided as a committed `secrets.example.yaml` template plus a gitignored `secrets.yaml` — mirroring `.env.example` / `.env`. The four application images are built locally and loaded into the cluster with `kind load docker-image`, since there is no registry involved yet.
+
+One deliberate tradeoff: the Mosquitto/Prometheus/Grafana configuration is currently duplicated between `infrastructure/*/`(used by Docker Compose) and inline inside the Kubernetes ConfigMaps, since there is no templating layer yet connecting the two. That duplication is exactly what the next milestone, Helm, exists to remove.
+
+The next milestone moves to Helm, to package these manifests and stop hand-duplicating configuration between Compose and Kubernetes.
 
 ---
 
@@ -300,6 +304,73 @@ python -m venv .venv
 ```
 
 (`cloud-api` runs via `./.venv/Scripts/python.exe -m uvicorn main:app --host 127.0.0.1 --port 8000` instead.) Configuration is still read from the `.env` file at the repository root via `python-dotenv`.
+
+---
+
+## Running on Kubernetes
+
+This is an alternative to Docker Compose — stop the Compose stack first (`docker compose down`), since both try to bind the same host ports.
+
+### Prerequisites
+
+- [`kind`](https://kind.sigs.k8s.io/) and `kubectl`
+
+### 1. Create the cluster
+
+```bash
+cd infrastructure/kubernetes
+kind create cluster --config kind-config.yaml
+```
+
+### 2. Build and load the application images
+
+`kind` runs Kubernetes nodes as Docker containers with their own image store, so locally built images need to be loaded in explicitly:
+
+```bash
+cd ../..   # repository root
+docker build -t santa-maria/sensor-simulator:latest ./services/sensor-simulator
+docker build -t santa-maria/edge-ingestion:latest ./services/edge-ingestion
+docker build -t santa-maria/edge-sync:latest ./services/edge-sync
+docker build -t santa-maria/cloud-api:latest ./services/cloud-api
+
+kind load docker-image santa-maria/sensor-simulator:latest santa-maria/edge-ingestion:latest santa-maria/edge-sync:latest santa-maria/cloud-api:latest --name santa-maria
+```
+
+### 3. Set up secrets and apply the manifests
+
+```bash
+cd infrastructure/kubernetes
+cp secrets.example.yaml secrets.yaml   # edit with real values first, if not using the defaults
+
+kubectl apply -f namespace.yaml
+kubectl apply -f secrets.yaml -f configmaps.yaml -f grafana-dashboard-configmap.yaml
+kubectl apply -f postgres-edge.yaml -f postgres-cloud.yaml -f mosquitto.yaml -f prometheus.yaml -f jaeger.yaml -f grafana.yaml -f cloud-api.yaml -f edge-ingestion.yaml -f edge-sync.yaml -f sensor-simulator.yaml
+```
+
+### 4. Check everything is healthy
+
+```bash
+kubectl get pods -n santa-maria
+```
+
+It's normal to see a couple of early restarts on `edge-ingestion`, `edge-sync` and `cloud-api` — they can start before Postgres has finished pulling its image and becoming ready, and Kubernetes' restart policy recovers them automatically once their dependency is up (the same resilience story as everywhere else in this project, just at the orchestration layer this time).
+
+### 5. Access the UIs
+
+`kind-config.yaml` maps the same ports Docker Compose used, so nothing changes for you here: Grafana on `localhost:3000`, Prometheus on `localhost:9090`, Jaeger on `localhost:16686`, and the Cloud API on `localhost:8000`.
+
+### 6. Verify persisted data
+
+```bash
+kubectl exec -n santa-maria deploy/postgres-edge -- psql -U santamaria -d santamaria_edge -c "SELECT id, device_id, value, is_anomalous, synced FROM telemetry ORDER BY id DESC LIMIT 10;"
+kubectl exec -n santa-maria deploy/postgres-cloud -- psql -U santamaria -d santamaria_cloud -c "SELECT edge_record_id, device_id, value, synced_at FROM telemetry ORDER BY id DESC LIMIT 10;"
+```
+
+### 7. Tear down
+
+```bash
+kind delete cluster --name santa-maria
+```
 
 ---
 
