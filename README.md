@@ -187,7 +187,7 @@ tests/
 - [x] Prometheus
 - [x] Grafana
 - [ ] OpenTelemetry
-- [ ] Docker Compose for application services
+- [x] Docker Compose for application services
 - [ ] Kubernetes
 - [ ] Helm
 
@@ -203,7 +203,7 @@ The second milestone is also complete: the Edge now synchronizes with the Cloud.
 
 The third milestone, observability, is also complete. `edge-ingestion`, `edge-sync` and `cloud-api` each expose a Prometheus `/metrics` endpoint with counters for messages received, rejected, flagged as anomalous, persisted, synced and sync failures. Prometheus scrapes all three; Grafana is provisioned with two datasources — Prometheus for those service metrics, and PostgreSQL Edge queried directly for the pending sync queue depth, since that number already lives in the `telemetry` table and does not need to be duplicated as a metric. An overview dashboard ships versioned in the repo (`infrastructure/grafana/provisioning/dashboards/json/`).
 
-Mosquitto, PostgreSQL (Edge), PostgreSQL (Cloud), Prometheus and Grafana currently run through Docker Compose (`infrastructure/`); the four Python services (`sensor-simulator`, `edge-ingestion`, `edge-sync`, `cloud-api`) still run natively, which will change once they are containerized.
+All four Python services now run as containers alongside the rest of the infrastructure, each built from its own `Dockerfile` and wired together on the Compose network by service name (e.g. `edge-ingestion` connects to `postgres-edge` and `mosquitto` directly, no `localhost` involved). Every service still falls back to `localhost` for its dependencies when run natively outside Docker, which remains useful for quick local debugging.
 
 The next milestone focuses on tracing: adding OpenTelemetry to follow a single telemetry record across the Edge and Cloud, before moving on to Kubernetes and Helm.
 
@@ -214,75 +214,56 @@ The next milestone focuses on tracing: adding OpenTelemetry to follow a single t
 ### Prerequisites
 
 - Docker Desktop (with WSL2 backend, on Windows)
-- Python 3.13+
 
-### 1. Start the infrastructure (MQTT broker + PostgreSQL)
+### 1. Start the platform
 
 ```bash
 cp .env.example .env
-docker compose up -d
+docker compose up -d --build
 ```
 
-This starts:
+This builds and starts everything:
 
 - Eclipse Mosquitto on `localhost:1883`
 - PostgreSQL (Edge) on `localhost:5432`, with the `telemetry` table created automatically from `infrastructure/postgres/edge/init.sql`
 - PostgreSQL (Cloud) on `localhost:5433`, with its own `telemetry` table created from `infrastructure/postgres/cloud/init.sql`
-- Prometheus on `localhost:9090`, configured to scrape the three Python services running on the host (`infrastructure/prometheus/prometheus.yml`)
+- Prometheus on `localhost:9090`, scraping `edge-ingestion`, `edge-sync` and `cloud-api` by container name (`infrastructure/prometheus/prometheus.yml`)
 - Grafana on `localhost:3000` (login with `GRAFANA_ADMIN_USER` / `GRAFANA_ADMIN_PASSWORD` from `.env`), pre-provisioned with the Prometheus and PostgreSQL Edge datasources and the "Santa Maria Edge Platform - Overview" dashboard
+- `sensor-simulator`, `edge-ingestion`, `edge-sync` and `cloud-api`, each built from its own `services/<name>/Dockerfile`, wired together by Compose service name
 
-### 2. Set up each Python service
-
-Each service under `services/` (`sensor-simulator`, `edge-ingestion`, `edge-sync`, `cloud-api`) has its own virtual environment and dependencies:
-
-```bash
-cd services/<service-name>
-python -m venv .venv
-./.venv/Scripts/python.exe -m pip install -r requirements.txt
-```
-
-All services read their configuration from the `.env` file at the repository root (loaded automatically via `python-dotenv`), so no manual environment exports are needed.
-
-### 3. Run the services
-
-Each in its own terminal, in this order:
+Give it a few seconds, then check everything is healthy:
 
 ```bash
-cd services/cloud-api
-./.venv/Scripts/python.exe -m uvicorn main:app --host 127.0.0.1 --port 8000
-```
-
-```bash
-cd services/edge-ingestion
-./.venv/Scripts/python.exe main.py
-```
-
-```bash
-cd services/edge-sync
-./.venv/Scripts/python.exe main.py
-```
-
-```bash
-cd services/sensor-simulator
-./.venv/Scripts/python.exe main.py
+docker compose ps
+docker compose logs -f edge-ingestion edge-sync sensor-simulator
 ```
 
 You should see the simulator publishing readings, `edge-ingestion` logging each received (and, occasionally, anomalous) message, and `edge-sync` reporting batches synced to the Cloud roughly every 10 seconds.
 
-### 4. Verify persisted data
+### 2. Verify persisted data
 
 ```bash
 docker compose exec postgres-edge psql -U santamaria -d santamaria_edge -c "SELECT id, device_id, value, is_anomalous, synced FROM telemetry ORDER BY id DESC LIMIT 10;"
 docker compose exec postgres-cloud psql -U santamaria -d santamaria_cloud -c "SELECT edge_record_id, device_id, value, synced_at FROM telemetry ORDER BY id DESC LIMIT 10;"
 ```
 
-### 5. Try the resilience scenario
+### 3. Try the resilience scenario
 
-Stop `cloud-api` (`Ctrl+C`) while the other services keep running. Telemetry keeps being validated and stored on the Edge, but `edge-sync` will start logging failed sync attempts and the `synced` column will stay `false` for new rows. Restart `cloud-api`, and the next `edge-sync` cycle picks up everything that queued up in the meantime — with no duplicates in the Cloud database.
+```bash
+docker compose stop cloud-api
+```
 
-### 6. Watch it in Grafana
+Telemetry keeps being validated and stored on the Edge, but `edge-sync` will start logging failed sync attempts and the `synced` column will stay `false` for new rows.
 
-Open `http://localhost:3000`, log in, and open the "Santa Maria Edge Platform - Overview" dashboard. While the services and simulator are running you should see the message/anomaly/sync rates move, and the "Pending Sync Queue" panel spike when you stop `cloud-api` and drain back to zero once you restart it.
+```bash
+docker compose start cloud-api
+```
+
+The next `edge-sync` cycle picks up everything that queued up in the meantime — with no duplicates in the Cloud database.
+
+### 4. Watch it in Grafana
+
+Open `http://localhost:3000`, log in, and open the "Santa Maria Edge Platform - Overview" dashboard. While the platform is running you should see the message/anomaly/sync rates move, and the "Pending Sync Queue" panel spike when you stop `cloud-api` and drain back to zero once you restart it.
 
 You can also query the raw metrics directly, without Grafana:
 
@@ -292,15 +273,26 @@ curl http://localhost:8002/metrics   # edge-sync
 curl http://localhost:8000/metrics   # cloud-api
 ```
 
-### 7. Stop everything
-
-Stop the Python processes with `Ctrl+C`, then:
+### 5. Stop everything
 
 ```bash
 docker compose down
 ```
 
 Add `-v` to also delete the PostgreSQL data volumes.
+
+### Running a service natively (optional)
+
+Each service under `services/` still works outside Docker for quick local debugging — every host it depends on (`MQTT_BROKER_HOST`, `POSTGRES_HOST`, `CLOUD_API_URL`) defaults to `localhost`, matching the ports Compose publishes to the host:
+
+```bash
+cd services/<service-name>
+python -m venv .venv
+./.venv/Scripts/python.exe -m pip install -r requirements.txt
+./.venv/Scripts/python.exe main.py
+```
+
+(`cloud-api` runs via `./.venv/Scripts/python.exe -m uvicorn main:app --host 127.0.0.1 --port 8000` instead.) Configuration is still read from the `.env` file at the repository root via `python-dotenv`.
 
 ---
 
