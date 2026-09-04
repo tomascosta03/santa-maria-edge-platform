@@ -10,14 +10,14 @@ load_dotenv()
 
 
 MQTT_CLIENT_ID = "edge-ingestion"
-MQTT_BROKER_HOST = "localhost"
+MQTT_BROKER_HOST = os.environ.get("MQTT_BROKER_HOST", "localhost")
 MQTT_BROKER_PORT = 1883
 MQTT_KEEPALIVE_SECONDS = 60
 
 MQTT_TOPIC = "santa-maria/telemetry/#"
 MQTT_QOS = 0
 
-POSTGRES_HOST = "localhost"
+POSTGRES_HOST = os.environ.get("POSTGRES_HOST", "localhost")
 POSTGRES_PORT = 5432
 POSTGRES_DB = os.environ.get("EDGE_POSTGRES_DB", "santamaria_edge")
 POSTGRES_USER = os.environ.get("EDGE_POSTGRES_USER", "santamaria")

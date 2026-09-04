@@ -17,8 +17,8 @@ RECORDS_RECEIVED_TOTAL = Counter(
 )
 
 
-POSTGRES_HOST = "localhost"
-POSTGRES_PORT = 5433
+POSTGRES_HOST = os.environ.get("POSTGRES_HOST", "localhost")
+POSTGRES_PORT = int(os.environ.get("POSTGRES_PORT", "5433"))
 POSTGRES_DB = os.environ.get("CLOUD_POSTGRES_DB", "santamaria_cloud")
 POSTGRES_USER = os.environ.get("CLOUD_POSTGRES_USER", "santamaria")
 POSTGRES_PASSWORD = os.environ.get("CLOUD_POSTGRES_PASSWORD", "")
