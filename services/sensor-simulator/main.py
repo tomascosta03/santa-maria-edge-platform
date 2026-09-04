@@ -5,6 +5,11 @@ import time
 
 import paho.mqtt.client as mqtt
 from dotenv import load_dotenv
+from opentelemetry import trace
+from opentelemetry.exporter.otlp.proto.http.trace_exporter import OTLPSpanExporter
+from opentelemetry.sdk.resources import SERVICE_NAME, Resource
+from opentelemetry.sdk.trace import TracerProvider
+from opentelemetry.sdk.trace.export import BatchSpanProcessor
 
 load_dotenv()
 
@@ -19,6 +24,19 @@ MQTT_TOPIC = f"santa-maria/telemetry/temperature/{DEVICE_ID}"
 MQTT_QOS = 0
 
 MEASUREMENT_INTERVAL_SECONDS = 5
+
+OTEL_EXPORTER_OTLP_ENDPOINT = os.environ.get(
+    "OTEL_EXPORTER_OTLP_ENDPOINT", "http://localhost:4318/v1/traces"
+)
+
+trace.set_tracer_provider(
+    TracerProvider(resource=Resource.create({SERVICE_NAME: "sensor-simulator"}))
+)
+trace.get_tracer_provider().add_span_processor(
+    BatchSpanProcessor(OTLPSpanExporter(endpoint=OTEL_EXPORTER_OTLP_ENDPOINT))
+)
+
+tracer = trace.get_tracer(__name__)
 
 
 def generate_temperature() -> float:
@@ -74,27 +92,29 @@ def main() -> None:
 
     try:
         while True:
-            temperature_celsius = generate_temperature()
+            with tracer.start_as_current_span("sensor_simulator.publish_reading") as span:
+                temperature_celsius = generate_temperature()
 
-            telemetry_message = build_telemetry_message(
-                temperature_celsius
-            )
-            payload = json.dumps(telemetry_message)
-
-            publish_info = mqtt_client.publish(
-                MQTT_TOPIC,
-                payload,
-                qos=MQTT_QOS,
-            )
-
-            if publish_info.rc != mqtt.MQTT_ERR_SUCCESS:
-                print(
-                    f"Failed to publish MQTT message: "
-                    f"{publish_info.rc}"
+                telemetry_message = build_telemetry_message(
+                    temperature_celsius
                 )
-            else:
-                publish_info.wait_for_publish()
-                print(f"Published to {MQTT_TOPIC}: {payload}")
+                payload = json.dumps(telemetry_message)
+                span.set_attribute("telemetry.value", telemetry_message["value"])
+
+                publish_info = mqtt_client.publish(
+                    MQTT_TOPIC,
+                    payload,
+                    qos=MQTT_QOS,
+                )
+
+                if publish_info.rc != mqtt.MQTT_ERR_SUCCESS:
+                    print(
+                        f"Failed to publish MQTT message: "
+                        f"{publish_info.rc}"
+                    )
+                else:
+                    publish_info.wait_for_publish()
+                    print(f"Published to {MQTT_TOPIC}: {payload}")
 
             time.sleep(MEASUREMENT_INTERVAL_SECONDS)
 

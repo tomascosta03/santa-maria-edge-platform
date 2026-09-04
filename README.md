@@ -186,7 +186,7 @@ tests/
 - [x] PostgreSQL Persistence (Cloud)
 - [x] Prometheus
 - [x] Grafana
-- [ ] OpenTelemetry
+- [x] OpenTelemetry
 - [x] Docker Compose for application services
 - [ ] Kubernetes
 - [ ] Helm
@@ -205,7 +205,9 @@ The third milestone, observability, is also complete. `edge-ingestion`, `edge-sy
 
 All four Python services now run as containers alongside the rest of the infrastructure, each built from its own `Dockerfile` and wired together on the Compose network by service name (e.g. `edge-ingestion` connects to `postgres-edge` and `mosquitto` directly, no `localhost` involved). Every service still falls back to `localhost` for its dependencies when run natively outside Docker, which remains useful for quick local debugging.
 
-The next milestone focuses on tracing: adding OpenTelemetry to follow a single telemetry record across the Edge and Cloud, before moving on to Kubernetes and Helm.
+The fourth milestone adds distributed tracing with OpenTelemetry, exported to Jaeger. This was done in two tiers, on purpose: `edge-sync -> cloud-api` is a real synchronous HTTP call, so it gets full automatic trace propagation (`requests` on the client, FastAPI and psycopg on the server) — a single trace shows the sync batch, the HTTP call, the Cloud API handling it, and the resulting PostgreSQL insert, all connected. `sensor-simulator` and `edge-ingestion` each get their own span per message instead of being stitched into that same trace, because MQTT has no standard mechanism for carrying trace context across the broker, and the sync queue is asynchronous by design (a telemetry row can sit unsynced for an arbitrary amount of time before `edge-sync` picks it up) — a live parent/child span across either boundary would misrepresent what actually happened. Linking those into one end-to-end trace (via manual context propagation and span links) is a natural next step if deeper tracing is needed later.
+
+The next milestone moves to Kubernetes and Helm.
 
 ---
 
@@ -229,6 +231,7 @@ This builds and starts everything:
 - PostgreSQL (Cloud) on `localhost:5433`, with its own `telemetry` table created from `infrastructure/postgres/cloud/init.sql`
 - Prometheus on `localhost:9090`, scraping `edge-ingestion`, `edge-sync` and `cloud-api` by container name (`infrastructure/prometheus/prometheus.yml`)
 - Grafana on `localhost:3000` (login with `GRAFANA_ADMIN_USER` / `GRAFANA_ADMIN_PASSWORD` from `.env`), pre-provisioned with the Prometheus and PostgreSQL Edge datasources and the "Santa Maria Edge Platform - Overview" dashboard
+- Jaeger on `localhost:16686`, receiving traces from all four services over OTLP
 - `sensor-simulator`, `edge-ingestion`, `edge-sync` and `cloud-api`, each built from its own `services/<name>/Dockerfile`, wired together by Compose service name
 
 Give it a few seconds, then check everything is healthy:
@@ -273,7 +276,11 @@ curl http://localhost:8002/metrics   # edge-sync
 curl http://localhost:8000/metrics   # cloud-api
 ```
 
-### 5. Stop everything
+### 5. Watch a distributed trace in Jaeger
+
+Open `http://localhost:16686`, pick service `edge-sync`, operation `edge_sync.sync_batch`, and hit "Find Traces". Open one: you'll see the sync span, the outgoing HTTP call, `cloud-api`'s `POST /telemetry` server span, and the resulting PostgreSQL `INSERT` — all one trace, in the order they actually happened. Service `edge-ingestion` (operation `edge_ingestion.process_message`) and `sensor-simulator` (operation `sensor_simulator.publish_reading`) each show their own, separate per-message traces.
+
+### 6. Stop everything
 
 ```bash
 docker compose down
@@ -283,7 +290,7 @@ Add `-v` to also delete the PostgreSQL data volumes.
 
 ### Running a service natively (optional)
 
-Each service under `services/` still works outside Docker for quick local debugging — every host it depends on (`MQTT_BROKER_HOST`, `POSTGRES_HOST`, `CLOUD_API_URL`) defaults to `localhost`, matching the ports Compose publishes to the host:
+Each service under `services/` still works outside Docker for quick local debugging — every host it depends on (`MQTT_BROKER_HOST`, `POSTGRES_HOST`, `CLOUD_API_URL`, `OTEL_EXPORTER_OTLP_ENDPOINT`) defaults to `localhost`, matching the ports Compose publishes to the host:
 
 ```bash
 cd services/<service-name>

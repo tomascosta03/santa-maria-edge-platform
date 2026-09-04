@@ -5,6 +5,13 @@ from datetime import datetime
 import psycopg
 from dotenv import load_dotenv
 from fastapi import FastAPI, Response
+from opentelemetry import trace
+from opentelemetry.exporter.otlp.proto.http.trace_exporter import OTLPSpanExporter
+from opentelemetry.instrumentation.fastapi import FastAPIInstrumentor
+from opentelemetry.instrumentation.psycopg import PsycopgInstrumentor
+from opentelemetry.sdk.resources import SERVICE_NAME, Resource
+from opentelemetry.sdk.trace import TracerProvider
+from opentelemetry.sdk.trace.export import BatchSpanProcessor
 from prometheus_client import CONTENT_TYPE_LATEST, Counter, generate_latest
 from pydantic import BaseModel
 
@@ -22,6 +29,19 @@ POSTGRES_PORT = int(os.environ.get("POSTGRES_PORT", "5433"))
 POSTGRES_DB = os.environ.get("CLOUD_POSTGRES_DB", "santamaria_cloud")
 POSTGRES_USER = os.environ.get("CLOUD_POSTGRES_USER", "santamaria")
 POSTGRES_PASSWORD = os.environ.get("CLOUD_POSTGRES_PASSWORD", "")
+
+OTEL_EXPORTER_OTLP_ENDPOINT = os.environ.get(
+    "OTEL_EXPORTER_OTLP_ENDPOINT", "http://localhost:4318/v1/traces"
+)
+
+trace.set_tracer_provider(
+    TracerProvider(resource=Resource.create({SERVICE_NAME: "cloud-api"}))
+)
+trace.get_tracer_provider().add_span_processor(
+    BatchSpanProcessor(OTLPSpanExporter(endpoint=OTEL_EXPORTER_OTLP_ENDPOINT))
+)
+
+PsycopgInstrumentor().instrument()
 
 
 class TelemetryRecord(BaseModel):
@@ -81,6 +101,7 @@ async def lifespan(app: FastAPI):
 
 
 app = FastAPI(title="Santa Maria Cloud API", lifespan=lifespan)
+FastAPIInstrumentor.instrument_app(app)
 
 
 @app.get("/health")

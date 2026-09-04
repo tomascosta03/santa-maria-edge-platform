@@ -4,6 +4,12 @@ import os
 import paho.mqtt.client as mqtt
 import psycopg
 from dotenv import load_dotenv
+from opentelemetry import trace
+from opentelemetry.exporter.otlp.proto.http.trace_exporter import OTLPSpanExporter
+from opentelemetry.instrumentation.psycopg import PsycopgInstrumentor
+from opentelemetry.sdk.resources import SERVICE_NAME, Resource
+from opentelemetry.sdk.trace import TracerProvider
+from opentelemetry.sdk.trace.export import BatchSpanProcessor
 from prometheus_client import Counter, start_http_server
 
 load_dotenv()
@@ -45,6 +51,20 @@ MESSAGES_PERSISTED_TOTAL = Counter(
     "edge_ingestion_messages_persisted_total",
     "Total telemetry messages persisted to PostgreSQL",
 )
+
+OTEL_EXPORTER_OTLP_ENDPOINT = os.environ.get(
+    "OTEL_EXPORTER_OTLP_ENDPOINT", "http://localhost:4318/v1/traces"
+)
+
+trace.set_tracer_provider(
+    TracerProvider(resource=Resource.create({SERVICE_NAME: "edge-ingestion"}))
+)
+trace.get_tracer_provider().add_span_processor(
+    BatchSpanProcessor(OTLPSpanExporter(endpoint=OTEL_EXPORTER_OTLP_ENDPOINT))
+)
+PsycopgInstrumentor().instrument()
+
+tracer = trace.get_tracer(__name__)
 
 
 REQUIRED_TELEMETRY_FIELDS = {
@@ -217,34 +237,40 @@ def on_message(
     postgres_connection: psycopg.Connection,
     message: mqtt.MQTTMessage,
 ) -> None:
-    MESSAGES_RECEIVED_TOTAL.inc()
+    with tracer.start_as_current_span("edge_ingestion.process_message") as span:
+        span.set_attribute("mqtt.topic", message.topic)
 
-    telemetry_message = parse_payload(message.payload)
+        MESSAGES_RECEIVED_TOTAL.inc()
 
-    if telemetry_message is None:
-        MESSAGES_PARSE_FAILED_TOTAL.inc()
-        return
+        telemetry_message = parse_payload(message.payload)
 
-    if not validate_telemetry_message(telemetry_message):
-        MESSAGES_VALIDATION_FAILED_TOTAL.inc()
-        return
+        if telemetry_message is None:
+            MESSAGES_PARSE_FAILED_TOTAL.inc()
+            span.set_attribute("telemetry.rejected_reason", "parse_error")
+            return
 
-    anomalous = is_anomalous_telemetry(telemetry_message)
+        if not validate_telemetry_message(telemetry_message):
+            MESSAGES_VALIDATION_FAILED_TOTAL.inc()
+            span.set_attribute("telemetry.rejected_reason", "validation_error")
+            return
 
-    if anomalous:
-        ANOMALIES_DETECTED_TOTAL.inc()
+        anomalous = is_anomalous_telemetry(telemetry_message)
+        span.set_attribute("telemetry.anomalous", anomalous)
+
+        if anomalous:
+            ANOMALIES_DETECTED_TOTAL.inc()
+            print(
+                f"Anomalous telemetry detected from {message.topic}: "
+                f"{telemetry_message}"
+            )
+
+        persist_telemetry(postgres_connection, telemetry_message, anomalous)
+        MESSAGES_PERSISTED_TOTAL.inc()
+
         print(
-            f"Anomalous telemetry detected from {message.topic}: "
+            f"Received valid telemetry from {message.topic}: "
             f"{telemetry_message}"
         )
-
-    persist_telemetry(postgres_connection, telemetry_message, anomalous)
-    MESSAGES_PERSISTED_TOTAL.inc()
-
-    print(
-        f"Received valid telemetry from {message.topic}: "
-        f"{telemetry_message}"
-    )
 
 
 def create_mqtt_client(postgres_connection: psycopg.Connection) -> mqtt.Client:
