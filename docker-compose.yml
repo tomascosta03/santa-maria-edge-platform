@@ -4,7 +4,7 @@ services:
     ports:
       - "1883:1883"
     volumes:
-      - ./infrastructure/mosquitto/mosquitto.conf:/mosquitto/config/mosquitto.conf:ro
+      - ./infrastructure/kubernetes/helm/santa-maria/files/mosquitto.conf:/mosquitto/config/mosquitto.conf:ro
 
   postgres-edge:
     image: postgres:16
@@ -16,7 +16,7 @@ services:
       - "5432:5432"
     volumes:
       - postgres-edge-data:/var/lib/postgresql/data
-      - ./infrastructure/postgres/edge/init.sql:/docker-entrypoint-initdb.d/init.sql:ro
+      - ./infrastructure/kubernetes/helm/santa-maria/files/postgres-edge-init.sql:/docker-entrypoint-initdb.d/init.sql:ro
 
   postgres-cloud:
     image: postgres:16
@@ -28,14 +28,14 @@ services:
       - "5433:5432"
     volumes:
       - postgres-cloud-data:/var/lib/postgresql/data
-      - ./infrastructure/postgres/cloud/init.sql:/docker-entrypoint-initdb.d/init.sql:ro
+      - ./infrastructure/kubernetes/helm/santa-maria/files/postgres-cloud-init.sql:/docker-entrypoint-initdb.d/init.sql:ro
 
   prometheus:
     image: prom/prometheus:latest
     ports:
       - "9090:9090"
     volumes:
-      - ./infrastructure/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - ./infrastructure/kubernetes/helm/santa-maria/files/prometheus.yml:/etc/prometheus/prometheus.yml:ro
 
   grafana:
     image: grafana/grafana:latest
@@ -48,7 +48,9 @@ services:
       EDGE_POSTGRES_USER: ${EDGE_POSTGRES_USER}
       EDGE_POSTGRES_PASSWORD: ${EDGE_POSTGRES_PASSWORD}
     volumes:
-      - ./infrastructure/grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./infrastructure/kubernetes/helm/santa-maria/files/grafana/datasources.yml:/etc/grafana/provisioning/datasources/datasources.yml:ro
+      - ./infrastructure/kubernetes/helm/santa-maria/files/grafana/dashboards.yml:/etc/grafana/provisioning/dashboards/dashboards.yml:ro
+      - ./infrastructure/kubernetes/helm/santa-maria/files/grafana/santa-maria-overview.json:/etc/grafana/provisioning/dashboards/json/santa-maria-overview.json:ro
       - grafana-data:/var/lib/grafana
     depends_on:
       - prometheus
