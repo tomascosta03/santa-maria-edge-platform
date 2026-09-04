@@ -4,6 +4,12 @@ import time
 import psycopg
 import requests
 from dotenv import load_dotenv
+from opentelemetry import trace
+from opentelemetry.exporter.otlp.proto.http.trace_exporter import OTLPSpanExporter
+from opentelemetry.instrumentation.requests import RequestsInstrumentor
+from opentelemetry.sdk.resources import SERVICE_NAME, Resource
+from opentelemetry.sdk.trace import TracerProvider
+from opentelemetry.sdk.trace.export import BatchSpanProcessor
 from prometheus_client import Counter, start_http_server
 
 load_dotenv()
@@ -31,6 +37,20 @@ SYNC_ATTEMPTS_FAILED_TOTAL = Counter(
     "edge_sync_attempts_failed_total",
     "Total sync attempts that failed to reach the Cloud API",
 )
+
+OTEL_EXPORTER_OTLP_ENDPOINT = os.environ.get(
+    "OTEL_EXPORTER_OTLP_ENDPOINT", "http://localhost:4318/v1/traces"
+)
+
+trace.set_tracer_provider(
+    TracerProvider(resource=Resource.create({SERVICE_NAME: "edge-sync"}))
+)
+trace.get_tracer_provider().add_span_processor(
+    BatchSpanProcessor(OTLPSpanExporter(endpoint=OTEL_EXPORTER_OTLP_ENDPOINT))
+)
+RequestsInstrumentor().instrument()
+
+tracer = trace.get_tracer(__name__)
 
 
 def create_postgres_connection() -> psycopg.Connection:
@@ -99,23 +119,27 @@ def mark_as_synced(connection: psycopg.Connection, telemetry_ids: list[int]) -> 
 
 
 def sync_once(connection: psycopg.Connection) -> int:
-    telemetry_rows = fetch_unsynced_telemetry(connection)
+    with tracer.start_as_current_span("edge_sync.sync_batch") as span:
+        telemetry_rows = fetch_unsynced_telemetry(connection)
+        span.set_attribute("telemetry.batch_size", len(telemetry_rows))
 
-    if not telemetry_rows:
-        return 0
+        if not telemetry_rows:
+            return 0
 
-    payload = build_cloud_payload(telemetry_rows)
+        payload = build_cloud_payload(telemetry_rows)
 
-    if not send_to_cloud(payload):
-        SYNC_ATTEMPTS_FAILED_TOTAL.inc()
-        return 0
+        if not send_to_cloud(payload):
+            SYNC_ATTEMPTS_FAILED_TOTAL.inc()
+            span.set_attribute("sync.success", False)
+            return 0
 
-    telemetry_ids = [row["id"] for row in telemetry_rows]
-    mark_as_synced(connection, telemetry_ids)
-    RECORDS_SYNCED_TOTAL.inc(len(telemetry_ids))
+        telemetry_ids = [row["id"] for row in telemetry_rows]
+        mark_as_synced(connection, telemetry_ids)
+        RECORDS_SYNCED_TOTAL.inc(len(telemetry_ids))
+        span.set_attribute("sync.success", True)
 
-    print(f"Synced {len(telemetry_ids)} telemetry record(s) to the Cloud")
-    return len(telemetry_ids)
+        print(f"Synced {len(telemetry_ids)} telemetry record(s) to the Cloud")
+        return len(telemetry_ids)
 
 
 def main() -> None:
