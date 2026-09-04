@@ -1,0 +1,24 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: sensor-simulator
+  namespace: santa-maria
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: sensor-simulator
+  template:
+    metadata:
+      labels:
+        app: sensor-simulator
+    spec:
+      containers:
+        - name: sensor-simulator
+          image: santa-maria/sensor-simulator:latest
+          imagePullPolicy: Never
+          env:
+            - name: MQTT_BROKER_HOST
+              value: mosquitto
+            - name: OTEL_EXPORTER_OTLP_ENDPOINT
+              value: http://jaeger:4318/v1/traces

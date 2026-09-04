@@ -150,6 +150,7 @@ activemq-data/
 # Environments
 .env
 .envrc
+infrastructure/kubernetes/secrets.yaml
 .venv
 env/
 venv/

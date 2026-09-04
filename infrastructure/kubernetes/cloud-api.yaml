@@ -1,0 +1,51 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: cloud-api
+  namespace: santa-maria
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: cloud-api
+  template:
+    metadata:
+      labels:
+        app: cloud-api
+    spec:
+      containers:
+        - name: cloud-api
+          image: santa-maria/cloud-api:latest
+          imagePullPolicy: Never
+          ports:
+            - containerPort: 8000
+          env:
+            - name: POSTGRES_HOST
+              value: postgres-cloud
+            - name: POSTGRES_PORT
+              value: "5432"
+            - name: OTEL_EXPORTER_OTLP_ENDPOINT
+              value: http://jaeger:4318/v1/traces
+            - name: CLOUD_POSTGRES_DB
+              valueFrom:
+                secretKeyRef: { name: santa-maria-secrets, key: CLOUD_POSTGRES_DB }
+            - name: CLOUD_POSTGRES_USER
+              valueFrom:
+                secretKeyRef: { name: santa-maria-secrets, key: CLOUD_POSTGRES_USER }
+            - name: CLOUD_POSTGRES_PASSWORD
+              valueFrom:
+                secretKeyRef: { name: santa-maria-secrets, key: CLOUD_POSTGRES_PASSWORD }
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: cloud-api
+  namespace: santa-maria
+spec:
+  type: NodePort
+  selector:
+    app: cloud-api
+  ports:
+    - port: 8000
+      targetPort: 8000
+      nodePort: 30800

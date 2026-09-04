@@ -1,0 +1,88 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: postgres-edge-init
+  namespace: santa-maria
+data:
+  init.sql: |
+    CREATE TABLE IF NOT EXISTS telemetry (
+        id BIGSERIAL PRIMARY KEY,
+        device_id TEXT NOT NULL,
+        metric TEXT NOT NULL,
+        value DOUBLE PRECISION NOT NULL,
+        unit TEXT NOT NULL,
+        is_anomalous BOOLEAN NOT NULL DEFAULT FALSE,
+        received_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+        synced BOOLEAN NOT NULL DEFAULT FALSE
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_telemetry_unsynced
+        ON telemetry (id)
+        WHERE synced = FALSE;
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: postgres-edge-data
+  namespace: santa-maria
+spec:
+  accessModes: ["ReadWriteOnce"]
+  resources:
+    requests:
+      storage: 1Gi
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: postgres-edge
+  namespace: santa-maria
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: postgres-edge
+  template:
+    metadata:
+      labels:
+        app: postgres-edge
+    spec:
+      containers:
+        - name: postgres-edge
+          image: postgres:16
+          ports:
+            - containerPort: 5432
+          env:
+            - name: POSTGRES_DB
+              valueFrom:
+                secretKeyRef: { name: santa-maria-secrets, key: EDGE_POSTGRES_DB }
+            - name: POSTGRES_USER
+              valueFrom:
+                secretKeyRef: { name: santa-maria-secrets, key: EDGE_POSTGRES_USER }
+            - name: POSTGRES_PASSWORD
+              valueFrom:
+                secretKeyRef: { name: santa-maria-secrets, key: EDGE_POSTGRES_PASSWORD }
+          volumeMounts:
+            - name: data
+              mountPath: /var/lib/postgresql/data
+              subPath: postgres
+            - name: init-script
+              mountPath: /docker-entrypoint-initdb.d
+      volumes:
+        - name: data
+          persistentVolumeClaim:
+            claimName: postgres-edge-data
+        - name: init-script
+          configMap:
+            name: postgres-edge-init
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: postgres-edge
+  namespace: santa-maria
+spec:
+  selector:
+    app: postgres-edge
+  ports:
+    - port: 5432
+      targetPort: 5432
